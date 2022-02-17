@@ -21,7 +21,8 @@
    [rumext.alpha :as mf]))
 
 (def stroke-attrs
-  [:stroke-style
+  [:strokes
+   :stroke-style
    :stroke-alignment
    :stroke-width
    :stroke-color
@@ -70,10 +71,6 @@
                 :group (tr "workspace.options.group-stroke")
                 (tr "workspace.options.stroke"))
 
-        show-options (not= (or (:stroke-style values) :none) :none)
-        show-caps    (and show-caps
-                          (not (#{:inner :outer} (:stroke-alignment values))))
-
         start-caps-state (mf/use-state {:open? false
                                         :top 0
                                         :left 0})
@@ -89,46 +86,58 @@
 
         handle-change-stroke-color
         (mf/use-callback
-          (mf/deps ids)
-          (fn [color]
-            (let [remove-multiple (fn [[_ value]] (not= value :multiple))
-                  color (into {} (filter remove-multiple) color)]
-              (st/emit! (dc/change-stroke ids color)))))
+         (mf/deps ids)
+         (fn [index]
+           (fn [color]
+             (println "-> handle-change-stroke-color" color)
+             (st/emit! (dc/change-stroke ids color index)))))
+
+
+        handle-remove
+        (mf/use-callback
+         (mf/deps ids)
+         (fn [index]
+           (fn []
+             (println "-> handle-remove" index)
+             (st/emit! (dc/remove-stroke ids index)))))
+
+        handle-remove-remove-all
+        (fn [_]
+          (st/emit! (dc/remove-all-strokes ids)))
 
         handle-detach
         (mf/use-callback
-          (mf/deps ids)
-          (fn []
-            (let [remove-multiple (fn [[_ value]] (not= value :multiple))
-                  current-stroke-color (-> (into {} (filter remove-multiple) current-stroke-color)
-                                           (assoc :id nil :file-id nil))]
-              (st/emit! (dc/change-stroke ids current-stroke-color)))))
+         (mf/deps ids)
+         (fn [index]
+           (fn [color]
+             (let [remove-multiple (fn [[_ value]] (not= value :multiple))
+                   current-stroke-color (-> (into {} (filter remove-multiple) current-stroke-color)
+                                            (assoc :id nil :file-id nil))]
+               ;; TODO CHECK
+               (st/emit! (dc/change-stroke ids current-stroke-color 0))))))
 
         on-stroke-style-change
-        (fn [event]
-          (let [value (-> (dom/get-target event)
-                          (dom/get-value)
-                          (d/read-string))]
-            (st/emit! (dch/update-shapes ids #(assoc % :stroke-style value)))))
+        (fn [index]
+          (fn [event]
+            (let [value (-> (dom/get-target event)
+                            (dom/get-value)
+                            (d/read-string))]
+              (st/emit! (dc/merge-stroke ids {:stroke-style value} index)))))
 
         on-stroke-alignment-change
-        (fn [event]
-          (let [value (-> (dom/get-target event)
-                          (dom/get-value)
-                          (d/read-string))]
-            (when-not (str/empty? value)
-              (st/emit! (dch/update-shapes ids #(assoc % :stroke-alignment value))))))
+        (fn [index]
+          (fn [event]
+            (let [value (-> (dom/get-target event)
+                            (dom/get-value)
+                            (d/read-string))]
+              (when-not (str/empty? value)
+                (st/emit! (dc/merge-stroke ids {:stroke-alignment value} index))))))
 
         on-stroke-width-change
-        (fn [value]
-          (when-not (str/empty? value)
-            (st/emit! (dch/update-shapes ids #(assoc % :stroke-width value)))))
-
-        update-cap-attr
-        (fn [& kvs]
-          #(if (= :path (:type %))
-             (apply (partial assoc %) kvs)
-             %))
+        (fn [index]
+          (fn [value]
+            (when-not (str/empty? value)
+              (st/emit! (dc/merge-stroke ids {:stroke-width value} index)))))
 
         open-caps-select
         (fn [caps-state]
@@ -146,8 +155,8 @@
                          (:left rect)
                          (- (:width window-size) 205))]
               (swap! caps-state assoc :open? true
-                                      :left left
-                                      :top top))))
+                     :left left
+                     :top top))))
 
         close-caps-select
         (fn [caps-state]
@@ -155,119 +164,125 @@
             (swap! caps-state assoc :open? false)))
 
         on-stroke-cap-start-change
-        (fn [value]
-          (st/emit! (dch/update-shapes ids (update-cap-attr :stroke-cap-start value))))
+        (fn [index value]
+          (println "on-stroke-cap-start-change" index value)
+          (st/emit! (dc/merge-stroke ids {:stroke-cap-start value} index)))
 
         on-stroke-cap-end-change
-        (fn [value]
-          (st/emit! (dch/update-shapes ids (update-cap-attr :stroke-cap-end value))))
+        (fn [index value]
+          (println "on-stroke-cap-end-change" index value)
+          (st/emit! (dc/merge-stroke ids {:stroke-cap-end value} index)))
 
         on-stroke-cap-switch
-        (fn [_]
-          (let [stroke-cap-start (:stroke-cap-start values)
-                stroke-cap-end   (:stroke-cap-end values)]
+        (fn [index]
+          (let [stroke-cap-start (get-in values [:strokes index :stroke-cap-start])
+                stroke-cap-end   (get-in values [:strokes index :stroke-cap-end])]
             (when (and (not= stroke-cap-start :multiple)
                        (not= stroke-cap-end :multiple))
-              (st/emit! (dch/update-shapes ids (update-cap-attr
-                                                 :stroke-cap-start stroke-cap-end
-                                                 :stroke-cap-end stroke-cap-start))))))
-
+              (st/emit! (dc/merge-stroke ids {:stroke-cap-start stroke-cap-end
+                                              :stroke-cap-end stroke-cap-start} index)))))
         on-add-stroke
         (fn [_]
-          (st/emit! (dch/update-shapes ids #(assoc %
-                                                   :stroke-style :solid
-                                                   :stroke-color clr/black
-                                                   :stroke-opacity 1
-                                                   :stroke-width 1))))
+          (st/emit! (dc/add-stroke ids {:stroke-style :solid
+                                        :stroke-color clr/black
+                                        :stroke-opacity 1
+                                        :stroke-width 1})))
+        _ (println "VALUES" values)]
 
-        on-del-stroke
-        (fn [_]
-          (st/emit! (dch/update-shapes ids #(assoc % :stroke-style :none))))]
+    [:div.element-set
+     [:div.element-set-title
+      [:span label]
+      [:div.add-page {:on-click on-add-stroke} i/close]]
 
-    (if show-options
-      [:div.element-set
-       [:div.element-set-title
-        [:span label]
-        [:div.add-page {:on-click on-del-stroke} i/minus]]
+     ;; TODO multiple
+     [:div.element-set-content
+      (cond
+        (= :multiple (:strokes values))
+        [:div.element-set-options-group
+         [:div.element-set-label (tr "settings.multiple")]
+         [:div.element-set-actions
+          [:div.element-set-actions-button {:on-click handle-remove-remove-all}
+           i/minus]]]
 
-       [:div.element-set-content
-        ;; Stroke Color
-        [:& color-row {:color current-stroke-color
-                       :title (tr "workspace.options.stroke-color")
-                       :on-change handle-change-stroke-color
-                       :on-detach handle-detach}]
 
-        ;; Stroke Width, Alignment & Style
-        [:div.row-flex
-         [:div.input-element
-          {:class (dom/classnames :pixels (not= (:stroke-width values) :multiple))
-           :title (tr "workspace.options.stroke-width")}
+        (seq (:strokes values))
+        (for [[index value] (d/enumerate (:strokes values []))]
+          ;; Stroke Color
+          [:*
+           [:& color-row {:color {:color (:stroke-color value)
+                                  :opacity (:stroke-opacity value)
+                                  :id (:stroke-color-ref-id value)
+                                  :file-id (:stroke-color-ref-file value)
+                                  :gradient (:stroke-color-gradient value)}
+                          :title (tr "workspace.options.stroke-color")
+                          :on-change (handle-change-stroke-color index)
+                          :on-detach (handle-detach index)
+                          :on-remove (handle-remove index)}]
 
-          [:> numeric-input
-           {:min 0
-            :value (-> (:stroke-width values) width->string)
-            :precision 2
-            :placeholder (tr "settings.multiple")
-            :on-change on-stroke-width-change}]]
+           ;; Stroke Width, Alignment & Style
+           [:div.row-flex
+            [:div.input-element
+             {:class (dom/classnames :pixels (not= (:stroke-width value) :multiple))
+              :title (tr "workspace.options.stroke-width")}
 
-         [:select#style.input-select {:value (enum->string (:stroke-alignment values))
-                                      :on-change on-stroke-alignment-change}
-          (when (= (:stroke-alignment values) :multiple)
-            [:option {:value ""} "--"])
-          [:option {:value ":center"} (tr "workspace.options.stroke.center")]
-          [:option {:value ":inner"} (tr "workspace.options.stroke.inner")]
-          [:option {:value ":outer"} (tr "workspace.options.stroke.outer")]]
+             [:> numeric-input
+              {:min 0
+               :value (-> (:stroke-width value) width->string)
+               :precision 2
+               :placeholder (tr "settings.multiple")
+               :on-change (on-stroke-width-change index)}]]
 
-         [:select#style.input-select {:value (enum->string (:stroke-style values))
-                                      :on-change on-stroke-style-change}
-          (when (= (:stroke-style values) :multiple)
-            [:option {:value ""} "--"])
-          [:option {:value ":solid"} (tr "workspace.options.stroke.solid")]
-          [:option {:value ":dotted"} (tr "workspace.options.stroke.dotted")]
-          [:option {:value ":dashed"} (tr "workspace.options.stroke.dashed")]
-          [:option {:value ":mixed"} (tr "workspace.options.stroke.mixed")]]]
+            [:select#style.input-select {:value (enum->string (:stroke-alignment value))
+                                         :on-change (on-stroke-alignment-change index)}
+             (when (= (:stroke-alignment value) :multiple)
+               [:option {:value ""} "--"])
+             [:option {:value ":center"} (tr "workspace.options.stroke.center")]
+             [:option {:value ":inner"} (tr "workspace.options.stroke.inner")]
+             [:option {:value ":outer"} (tr "workspace.options.stroke.outer")]]
 
-        ;; Stroke Caps
-        (when show-caps
-          [:div.row-flex
-           [:div.cap-select {:tab-index 0 ;; tab-index to make the element focusable
-                             :on-click (open-caps-select start-caps-state)}
-            (value->name (:stroke-cap-start values))
-            [:span.cap-select-button
-             i/arrow-down]]
-           [:& dropdown {:show (:open? @start-caps-state)
-                         :on-close (close-caps-select start-caps-state)}
-            [:ul.dropdown.cap-select-dropdown {:style {:top  (:top @start-caps-state)
-                                                       :left (:left @start-caps-state)}}
-             (for [[value label separator] (stroke-cap-names)]
-               (let [img (value->img value)]
-                 [:li {:class (dom/classnames :separator separator)
-                       :on-click #(on-stroke-cap-start-change value)}
-                  (when img [:img {:src (value->img value)}])
-                  label]))]]
+            [:select#style.input-select {:value (enum->string (:stroke-style value))
+                                         :on-change (on-stroke-style-change index)}
+             (when (= (:stroke-style value) :multiple)
+               [:option {:value ""} "--"])
+             [:option {:value ":solid"} (tr "workspace.options.stroke.solid")]
+             [:option {:value ":dotted"} (tr "workspace.options.stroke.dotted")]
+             [:option {:value ":dashed"} (tr "workspace.options.stroke.dashed")]
+             [:option {:value ":mixed"} (tr "workspace.options.stroke.mixed")]]]
 
-           [:div.element-set-actions-button {:on-click on-stroke-cap-switch}
-            i/switch]
+           ;; Stroke Caps
+           (when show-caps
+             [:div.row-flex
+              [:div.cap-select {:tab-index 0 ;; tab-index to make the element focusable
+                                :on-click (open-caps-select start-caps-state)}
+               (value->name (:stroke-cap-start value))
+               [:span.cap-select-button
+                i/arrow-down]]
+              [:& dropdown {:show (:open? @start-caps-state)
+                            :on-close (close-caps-select start-caps-state)}
+               [:ul.dropdown.cap-select-dropdown {:style {:top  (:top @start-caps-state)
+                                                          :left (:left @start-caps-state)}}
+                (for [[value label separator] (stroke-cap-names)]
+                  (let [img (value->img value)]
+                    [:li {:class (dom/classnames :separator separator)
+                          :on-click #(on-stroke-cap-start-change index value)}
+                     (when img [:img {:src (value->img value)}])
+                     label]))]]
 
-           [:div.cap-select {:tab-index 0
-                             :on-click (open-caps-select end-caps-state)}
-            (value->name (:stroke-cap-end values))
-            [:span.cap-select-button
-             i/arrow-down]]
-           [:& dropdown {:show (:open? @end-caps-state)
-                         :on-close (close-caps-select end-caps-state)}
-            [:ul.dropdown.cap-select-dropdown {:style {:top  (:top @end-caps-state)
-                                                       :left (:left @end-caps-state)}}
-             (for [[value label separator] (stroke-cap-names)]
-               (let [img (value->img value)]
-                 [:li {:class (dom/classnames :separator separator)
-                       :on-click #(on-stroke-cap-end-change value)}
-                  (when img [:img {:src (value->img value)}])
-                  label]))]]])]]
+              [:div.element-set-actions-button {:on-click #(on-stroke-cap-switch index)}
+               i/switch]
 
-      ;; NO STROKE
-      [:div.element-set
-       [:div.element-set-title
-        [:span label]
-        [:div.add-page {:on-click on-add-stroke} i/close]]])))
-
+              [:div.cap-select {:tab-index 0
+                                :on-click (open-caps-select end-caps-state)}
+               (value->name (:stroke-cap-end value))
+               [:span.cap-select-button
+                i/arrow-down]]
+              [:& dropdown {:show (:open? @end-caps-state)
+                            :on-close (close-caps-select end-caps-state)}
+               [:ul.dropdown.cap-select-dropdown {:style {:top  (:top @end-caps-state)
+                                                          :left (:left @end-caps-state)}}
+                (for [[value label separator] (stroke-cap-names)]
+                  (let [img (value->img value)]
+                    [:li {:class (dom/classnames :separator separator)
+                          :on-click #(on-stroke-cap-end-change index value)}
+                     (when img [:img {:src (value->img value)}])
+                     label]))]]])]))]]))

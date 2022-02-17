@@ -53,7 +53,9 @@
           (obj/set! "clipPath" (frame/frame-clip-url shape render-id))
 
           (= :group type)
-          (attrs/add-style-attrs shape render-id))]
+          (attrs/add-style-attrs shape render-id))
+        
+        {:keys [x y width height]} (:selrect shape)]
 
     [:& (mf/provider muc/render-ctx) {:value render-id}
      [:> :g wrapper-props
@@ -63,12 +65,13 @@
       [:defs
        [:& defs/svg-defs          {:shape shape :render-id render-id}]
        [:& filters/filters        {:shape shape :filter-id filter-id}]
-       [:& grad/gradient          {:shape shape :attr :stroke-color-gradient}]
+
        (when (or (some? (:fill-image shape))
                  (= :image (:type shape))
                  (> (count (:fills shape)) 1)
                  (some :fill-color-gradient (:fills shape)))
          [:& fills/fills            {:shape shape :render-id render-id}])
-       [:& cs/stroke-defs         {:shape shape :render-id render-id}]
+       #_[:& fills/fills            {:shape shape :render-id render-id}]
+
        [:& frame/frame-clip-def   {:shape shape :render-id render-id}]]
       children]]))

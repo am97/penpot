@@ -227,7 +227,7 @@
                                                 shape))))))))
 
 (defn change-stroke
-  [ids color]
+  [ids color index]
   (ptk/reify ::change-stroke
     ptk/WatchEvent
     (watch [_ _ _]
@@ -252,12 +252,49 @@
                     (assoc :stroke-opacity (:opacity color)))]
 
         (rx/of (dch/update-shapes ids (fn [shape]
-                                        (cond-> (d/merge shape attrs)
-                                          (= (:stroke-style shape) :none)
-                                          (assoc :stroke-style :solid
-                                                 :stroke-width 1
-                                                 :stroke-opacity 1)))))))))
+                                        (assoc-in shape [:strokes index] (merge (get-in shape [:strokes index]) attrs)))))))))
 
+(defn merge-stroke
+  [ids attrs index]
+  (ptk/reify ::merge-stroke
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/of (dch/update-shapes ids (fn [shape]
+                                      (assoc-in shape [:strokes index] (merge (get-in shape [:strokes index]) attrs))))))))
+
+(defn add-stroke
+  [ids stroke]
+  (ptk/reify ::add-stroke
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [add (fn [shape attrs] (assoc shape :strokes (into [attrs] (:strokes shape))))]
+        (rx/of (dch/update-shapes
+                ids
+                #(add % stroke)))))))
+
+(defn remove-stroke
+  [ids position]
+  (ptk/reify ::remove-stroke
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [remove-fill-by-index (fn [values index] (->> (d/enumerate values)
+                                                         (filterv (fn [[idx _]] (not= idx index)))
+                                                         (mapv second)))
+
+            remove (fn [shape] (update shape :strokes remove-fill-by-index position))]
+        (rx/of (dch/update-shapes
+                ids
+                #(remove %)))))))
+
+(defn remove-all-strokes
+  [ids]
+  (ptk/reify ::remove-all-strokes
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [remove-all (fn [shape] (assoc shape :strokes []))]
+        (rx/of (dch/update-shapes
+                ids
+                #(remove-all %)))))))
 
 (defn picker-for-selected-shape
   []

@@ -109,11 +109,12 @@
 
     (obj/merge! attrs (clj->js fill-attrs))))
 
-(defn add-stroke [attrs shape render-id]
+(defn add-stroke [attrs shape render-id index]
   (let [stroke-style (:stroke-style shape :none)
-        stroke-color-gradient-id (str "stroke-color-gradient_" render-id)
+        stroke-color-gradient-id (str "stroke-color-gradient_" render-id "_" index)
         stroke-width (:stroke-width shape 1)]
-    (if (not= stroke-style :none)
+    ;; TODO: check this
+    (if true #_(not= stroke-style :none)
       (let [stroke-attrs
             (cond-> {:strokeWidth stroke-width}
               (:stroke-color-gradient shape)
@@ -195,7 +196,7 @@
 
          styles (-> (obj/get props "style" (obj/new))
                     (obj/merge! svg-styles)
-                    (add-stroke shape render-id)
+                    (add-stroke (get-in shape [:strokes 0]) render-id 0)
                     (add-layer-props shape))
 
          styles (cond (or (some? (:fill-image shape))
@@ -230,6 +231,14 @@
                         (add-fill shape render-id index))]
     (-> (obj/new)
         (obj/set! "style" fill-styles))))
+
+(defn extract-stroke-attrs
+  [shape index]
+  (let [render-id (mf/use-ctx muc/render-ctx)
+        stroke-styles (-> (obj/get shape "style" (obj/new))
+                          (add-stroke shape render-id index))]
+    (-> (obj/new)
+        (obj/set! "style" stroke-styles))))
 
 (defn extract-border-radius-attrs
   [shape]
