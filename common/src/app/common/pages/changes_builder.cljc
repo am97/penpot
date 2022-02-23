@@ -7,7 +7,9 @@
 (ns app.common.pages.changes-builder
   (:require
    [app.common.data :as d]
-   [app.common.pages.helpers :as cph]))
+   [app.common.pages :as cp]
+   [app.common.pages.helpers :as cph]
+   [app.common.uuid :as uuid]))
 
 ;; Auxiliary functions to help create a set of changes (undo + redo)
 
@@ -29,7 +31,9 @@
              ::objects (:objects page)))
 
 (defn with-objects [changes objects]
-  (vary-meta changes assoc ::objects objects))
+  (let [file-data (-> (cp/make-file-data (uuid/next) uuid/zero)
+                      (assoc-in [:pages-index uuid/zero :objects] objects))]
+    (vary-meta changes assoc ::file-data file-data)))
 
 (defn amend-last-change
   "Modify the last redo-changes added with an update function."
@@ -52,7 +56,19 @@
 
 (defn- assert-objects
   [changes]
-  (assert (contains? (meta changes) ::objects) "Call (with-objects) before using this function"))
+  (assert (contains? (meta changes) ::file-data) "Call (with-objects) before using this function"))
+
+(defn- apply-changes-local
+  [changes n]
+  (if-let [file-data (::file-data (meta changes))]
+    (let [last-changes  (->> (take-last n (:redo-changes changes))
+                             (map #(assoc % :page-id uuid/zero)))
+          new-file-data (cp/process-changes file-data last-changes)]
+      (js/console.log "last-changes" (clj->js last-changes))
+      (js/console.log "file-data" (clj->js file-data))
+      (js/console.log "new-file-data" (clj->js new-file-data))
+      (vary-meta changes assoc ::file-data new-file-data))
+    changes))
 
 ;; Page changes
 
@@ -60,7 +76,8 @@
   [changes id name]
   (-> changes
       (update :redo-changes conj {:type :add-page :id id :name name})
-      (update :undo-changes conj {:type :del-page :id id})))
+      (update :undo-changes conj {:type :del-page :id id})
+      (apply-changes-local 1)))
 
 (defn add-page
   [changes id page]
@@ -141,7 +158,8 @@
   ([changes parent-id shapes index]
    (assert-page-id changes)
    (assert-objects changes)
-   (let [objects (::objects (meta changes))
+   (let [objects (-> changes meta ::file-data (get-in [:pages-index uuid/zero :objects]))
+
          set-parent-change
          (cond-> {:type :mov-objects
                   :parent-id parent-id
@@ -163,7 +181,8 @@
 
      (-> changes
          (update :redo-changes conj set-parent-change)
-         (update :undo-changes #(reduce mk-undo-change % shapes))))))
+         (update :undo-changes #(reduce mk-undo-change % shapes))
+         (apply-changes-local 1)))))
 
 (defn update-shapes
   "Calculate the changes and undos to be done when a function is applied to a
@@ -174,7 +193,7 @@
   ([changes ids update-fn {:keys [attrs ignore-geometry?] :or {attrs nil ignore-geometry? false}}]
    (assert-page-id changes)
    (assert-objects changes)
-   (let [objects (::objects (meta changes))
+   (let [objects (-> changes meta ::file-data (get-in [:pages-index uuid/zero :objects]))
 
          generate-operation
          (fn [changes attr old new ignore-geometry?]
@@ -213,14 +232,16 @@
                (seq uops)
                (update :undo-changes d/preconj (assoc change :operations uops)))))]
 
-     (reduce update-shape changes ids))))
+     (-> (reduce update-shape changes ids)
+         (apply-changes-local (count ids))))))
 
 (defn remove-objects
   [changes ids]
+  (js/console.log "meta" (clj->js (meta changes)))
   (assert-page-id changes)
   (assert-objects changes)
   (let [page-id (::page-id (meta changes))
-        objects (::objects (meta changes))
+        objects (-> changes meta ::file-data (get-in [:pages-index uuid/zero :objects]))
 
         add-redo-change
         (fn [change-set id]
